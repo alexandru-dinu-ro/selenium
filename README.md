@@ -1,23 +1,151 @@
-Follow-up: Symantec extension force-install blocking Edge automation (InPrivate)
+<dependencies>
+    <!-- Oracle JDBC thin driver (19c-compatible, works forward with Java 25) -->
+    <dependency>
+        <groupId>com.oracle.database.jdbc</groupId>
+        <artifactId>ojdbc11</artifactId>
+        <version>23.5.0.24.07</version>
+    </dependency>
 
-Hi team,
+    <!-- Required for wallet (TCPS/SSL) support with the thin driver -->
+    <dependency>
+        <groupId>com.oracle.database.security</groupId>
+        <artifactId>oraclepki</artifactId>
+        <version>23.5.0.24.07</version>
+    </dependency>
+    <dependency>
+        <groupId>com.oracle.database.security</groupId>
+        <artifactId>osdt_core</artifactId>
+        <version>23.5.0.24.07</version>
+    </dependency>
+    <dependency>
+        <groupId>com.oracle.database.security</groupId>
+        <artifactId>osdt_cert</artifactId>
+        <version>23.5.0.24.07</version>
+    </dependency>
 
-Follow-up to my earlier request about BrowserSignin. We've isolated a second, related issue on the same automation machine.
+    <!-- TestNG -->
+    <dependency>
+        <groupId>org.testng</groupId>
+        <artifactId>testng</artifactId>
+        <version>7.10.2</version>
+        <scope>test</scope>
+    </dependency>
+</dependencies>
 
-Our Selenium/Edge automation runs in InPrivate mode. Edge is now failing to launch cleanly with the error:
+---
 
-"Can't find extensions. Extensions with the IDs [lgliocaeggimgcpgbbejhdnbmajgaii, pldkfpaadpkjhggaejnlfmeneclddkhj] can't be located. Contact your administrator."
+# TNS alias to connect to
+db.tns.alias=MYDB_1
 
-We've identified these as the two Symantec-managed extensions force-installed on this machine. The dialog is non-dismissable and appears to prevent Edge from completing startup in InPrivate mode, which breaks our automated test sessions entirely (Selenium times out with a DevToolsActivePort error since Edge never finishes initializing).
+# Folder containing tnsnames.ora (NOT the wallet subfolder)
+db.tns.admin=C:/Users/myuser/AppData/Roaming/oracle
 
-Could you help with one of the following, whichever is compliant on your end?
+# Folder containing the wallet files (cwallet.sso etc.)
+db.wallet.location=src/test/resources/downloads
 
-1. Exclude this automation machine/service account from the Symantec extension force-install policy, if endpoint monitoring isn't required for automated test traffic, or
-2. Explicitly allow these two extension IDs to run in InPrivate windows (via Symantec's admin console or Edge's ExtensionSettings incognito allow-list), if exclusion isn't an option.
+---
 
-Machine name: [FILL IN]
-Extension IDs: lgliocaeggimgcpgbbejhdnbmajgaii, pldkfpaadpkjhggaejnlfmeneclddkhj
+package com.yourorg.framework.db;
 
-Happy to provide more logs or hop on a call. Thanks for looking into this.
+import oracle.jdbc.pool.OracleDataSource;
 
-[Your name]
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.sql.Connection;
+import java.sql.SQLException;
+import java.util.Properties;
+
+public final class ConnectionManager {
+
+    private static volatile ConnectionManager instance;
+
+    private final String tnsAlias;
+    private final String tnsAdmin;
+    private final String walletLocation;
+
+    private ConnectionManager() {
+        Properties props = loadProperties();
+
+        this.tnsAlias = System.getProperty("db.tns.alias",
+                props.getProperty("db.tns.alias"));
+
+        this.tnsAdmin = resolvePath(System.getenv("DB_TNS_ADMIN") != null
+                ? System.getenv("DB_TNS_ADMIN")
+                : props.getProperty("db.tns.admin"));
+
+        this.walletLocation = resolvePath(System.getenv("DB_WALLET_LOCATION") != null
+                ? System.getenv("DB_WALLET_LOCATION")
+                : props.getProperty("db.wallet.location"));
+    }
+
+    public static ConnectionManager getInstance() {
+        if (instance == null) {
+            synchronized (ConnectionManager.class) {
+                if (instance == null) {
+                    instance = new ConnectionManager();
+                }
+            }
+        }
+        return instance;
+    }
+
+    public Connection getConnection() throws SQLException {
+        // Thin driver + wallet: no sqlnet.ora needed.
+        System.setProperty("oracle.net.tns_admin", tnsAdmin);
+        System.setProperty("oracle.net.wallet_location", walletLocation);
+        System.setProperty("oracle.net.ssl_server_dn_match", "true");
+
+        OracleDataSource ds = new OracleDataSource();
+        ds.setURL("jdbc:oracle:thin:@" + tnsAlias + "?TNS_ADMIN=" + tnsAdmin);
+
+        // Auto-login wallet (cwallet.sso) -> no username/password required
+        return ds.getConnection();
+    }
+
+    private static Properties loadProperties() {
+        Properties props = new Properties();
+        try (InputStream in = ConnectionManager.class.getClassLoader()
+                .getResourceAsStream("db-config.properties")) {
+            if (in == null) {
+                throw new IllegalStateException("db-config.properties not found on classpath");
+            }
+            props.load(in);
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to load db-config.properties", e);
+        }
+        return props;
+    }
+
+    private static String resolvePath(String rawPath) {
+        Path path = Paths.get(rawPath);
+        return (path.isAbsolute() ? path : path.toAbsolutePath()).normalize().toString();
+    }
+}
+
+---
+
+package com.yourorg.framework.tests;
+
+import com.yourorg.framework.db.ConnectionManager;
+import org.testng.Assert;
+import org.testng.annotations.Test;
+
+import java.sql.Connection;
+import java.sql.ResultSet;
+import java.sql.Statement;
+
+public class DbSmokeTest {
+
+    @Test
+    public void canConnectAndQuery() throws Exception {
+        try (Connection conn = ConnectionManager.getInstance().getConnection();
+             Statement stmt = conn.createStatement();
+             ResultSet rs = stmt.executeQuery("SELECT 1 FROM DUAL")) {
+
+            Assert.assertTrue(rs.next());
+            Assert.assertEquals(rs.getInt(1), 1);
+        }
+    }
+}
