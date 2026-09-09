@@ -1,0 +1,27 @@
+
+import oracle.jdbc.pool.OracleDataSource;
+import org.testng.annotations.Test;
+
+import java.sql.Connection;
+
+public class WalletDiagnosticTest {
+
+    @Test
+    public void singleConnectionWithDescriptorFormat() throws Exception {
+        String tnsAlias = "MYDB_1";
+        String tnsAdmin = "C:/Users/myuser/AppData/Roaming/oracle";
+        String walletLocation = "src/test/resources/downloads";
+
+        System.setProperty("oracle.net.tns_admin", tnsAdmin);
+        System.setProperty("oracle.net.wallet_location",
+                "(SOURCE=(METHOD=FILE)(METHOD_DATA=(DIRECTORY=" + walletLocation + ")))");
+        System.setProperty("oracle.net.ssl_server_dn_match", "true");
+
+        OracleDataSource ds = new OracleDataSource();
+        ds.setURL("jdbc:oracle:thin:@" + tnsAlias);
+
+        try (Connection conn = ds.getConnection()) {
+            System.out.println("SUCCESS: " + !conn.isClosed());
+        }
+    }
+}
