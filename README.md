@@ -40,5 +40,20 @@ SELECT SYS_CONTEXT('USERENV','IP_ADDRESS') FROM DUAL
 
 --
 
-System.setProperty("oracle.net.wallet_location", walletLocation);
-System.setProperty("oracle.net.wallet_location", "(SOURCE=(METHOD=FILE)(METHOD_DATA=(DIRECTORY=" + walletLocation + ")))");
+warmUpWallet(tnsAlias);
+pds = PoolDataSourceFactory.getPoolDataSource();
+
+pds.setInitialPoolSize(1);
+pds.setMinPoolSize(1);
+
+private void warmUpWallet(String tnsAlias) {
+    try {
+        oracle.jdbc.pool.OracleDataSource ds = new oracle.jdbc.pool.OracleDataSource();
+        ds.setURL("jdbc:oracle:thin:@" + tnsAlias);
+        try (Connection warmup = ds.getConnection()) {
+            // just forces PKI/wallet init once, single-threaded
+        }
+    } catch (SQLException e) {
+        throw new RuntimeException("Wallet warm-up failed", e);
+    }
+}
