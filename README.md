@@ -1,9 +1,9 @@
-SELECT resource_name, current_utilization, max_utilization, limit_value
-FROM v$resource_limit
-WHERE resource_name IN ('processes','sessions');
+CREATE TABLE PERF_TEST_LOG (
+    ID          RAW(16)      DEFAULT SYS_GUID() PRIMARY KEY,
+    THREAD_NAME VARCHAR2(50),
+    CREATED_AT  TIMESTAMP    DEFAULT SYSTIMESTAMP
+);
 
 --
 
-SELECT name, value
-FROM v$parameter
-WHERE name IN ('processes','sessions');
+SELECT COUNT(*) FROM PERF_TEST_LOG;
