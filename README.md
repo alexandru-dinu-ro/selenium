@@ -37,3 +37,8 @@ SELECT SYS_CONTEXT('USERENV','NLS_TERRITORY') FROM DUAL
 SELECT SYS_CONTEXT('USERENV','CURRENT_SCHEMA') FROM DUAL
 SELECT SYS_CONTEXT('USERENV','NETWORK_PROTOCOL') FROM DUAL
 SELECT SYS_CONTEXT('USERENV','IP_ADDRESS') FROM DUAL
+
+--
+
+System.setProperty("oracle.net.wallet_location", walletLocation);
+System.setProperty("oracle.net.wallet_location", "(SOURCE=(METHOD=FILE)(METHOD_DATA=(DIRECTORY=" + walletLocation + ")))");
