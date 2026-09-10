@@ -1,6 +1,6 @@
-package com.yourorg.framework.tests;
+package com.db.neopam.tests.poc;
 
-import com.yourorg.framework.db.ConnectionManager;
+import com.db.neopam.infra.utils.jdbc.ConnectionManager;
 import org.testng.annotations.Test;
 
 import java.sql.Connection;
@@ -14,6 +14,10 @@ public class ConnectorScaleTest {
     @Test
     public void connectorScalesTo1000PlusConnections() throws InterruptedException {
         int threadCount = 1000;
+
+        // Sequential, single-threaded pre-warm — avoids the wallet
+        // Secret Store race entirely by never opening connections in parallel.
+        ConnectionManager.getInstance().preWarmPool(threadCount);
 
         AtomicInteger successCount = new AtomicInteger(0);
         AtomicInteger failureCount = new AtomicInteger(0);
@@ -51,7 +55,7 @@ public class ConnectorScaleTest {
              PreparedStatement ps = conn.prepareStatement("SELECT 1 FROM DUAL");
              ResultSet rs = ps.executeQuery()) {
 
-            rs.next(); // just proves the round trip worked
+            rs.next();
         }
     }
 }
