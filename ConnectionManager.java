@@ -1,4 +1,4 @@
-package com.yourorg.framework.db;
+package com.db.neopam.infra.utils.jdbc;
 
 import oracle.ucp.jdbc.PoolDataSource;
 import oracle.ucp.jdbc.PoolDataSourceFactory;
@@ -7,6 +7,8 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.sql.Connection;
 import java.sql.SQLException;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Properties;
 
 public final class ConnectionManager {
@@ -23,8 +25,13 @@ public final class ConnectionManager {
         String walletLocation = resolve(System.getenv("DB_WALLET_LOCATION"), props.getProperty("db.wallet.location"));
 
         System.setProperty("oracle.net.tns_admin", tnsAdmin);
-        System.setProperty("oracle.net.wallet_location", walletLocation);
+        System.setProperty("oracle.net.wallet_location",
+                "(SOURCE=(METHOD=FILE)(METHOD_DATA=(DIRECTORY=" + walletLocation + ")))");
         System.setProperty("oracle.net.ssl_server_dn_match", "true");
+
+        // One-time single-threaded warm-up of the wallet/PKI subsystem,
+        // using the plain driver (not UCP), before UCP touches anything.
+        warmUpWallet(tnsAlias);
 
         try {
             pds = PoolDataSourceFactory.getPoolDataSource();
@@ -32,10 +39,14 @@ public final class ConnectionManager {
             pds.setURL("jdbc:oracle:thin:@" + tnsAlias);
             pds.setConnectionPoolName("PERF_TEST_POOL");
 
-            pds.setInitialPoolSize(10);
-            pds.setMinPoolSize(10);
-            pds.setMaxPoolSize(1100);          // headroom above the 1000 target
-            pds.setConnectionWaitTimeout(60);  // seconds a thread waits if pool is maxed
+            // Keep startup pool size at 1 — UCP creates initialPoolSize
+            // connections in PARALLEL internally, which races against the
+            // wallet's Secret Store reader and intermittently fails.
+            // We grow the pool ourselves afterward via preWarmPool().
+            pds.setInitialPoolSize(1);
+            pds.setMinPoolSize(1);
+            pds.setMaxPoolSize(1100);
+            pds.setConnectionWaitTimeout(60);
 
         } catch (SQLException e) {
             throw new RuntimeException("Failed to configure UCP pool", e);
@@ -55,6 +66,26 @@ public final class ConnectionManager {
         return pds.getConnection();
     }
 
+    /**
+     * Grows the pool to targetSize by opening connections ONE AT A TIME,
+     * sequentially, on the calling thread. Call this once, before any
+     * concurrent load, to avoid racing UCP's/the wallet's Secret Store reader.
+     */
+    public void preWarmPool(int targetSize) {
+        List<Connection> held = new ArrayList<>();
+        try {
+            for (int i = 0; i < targetSize; i++) {
+                held.add(pds.getConnection());
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("Pre-warm failed at connection " + held.size(), e);
+        } finally {
+            for (Connection c : held) {
+                try { c.close(); } catch (SQLException ignored) {}
+            }
+        }
+    }
+
     public void printPoolStats() {
         try {
             System.out.printf("[UCP] borrowed=%d available=%d total=%d%n",
@@ -63,6 +94,18 @@ public final class ConnectionManager {
                     pds.getBorrowedConnectionsCount() + pds.getAvailableConnectionsCount());
         } catch (SQLException e) {
             System.err.println("Could not read pool stats: " + e.getMessage());
+        }
+    }
+
+    private void warmUpWallet(String tnsAlias) {
+        try {
+            oracle.jdbc.pool.OracleDataSource ds = new oracle.jdbc.pool.OracleDataSource();
+            ds.setURL("jdbc:oracle:thin:@" + tnsAlias);
+            try (Connection warmup = ds.getConnection()) {
+                // no-op; forces PKI/wallet init once, single-threaded
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("Wallet warm-up failed", e);
         }
     }
 
