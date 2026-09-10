@@ -40,13 +40,3 @@ SELECT SYS_CONTEXT('USERENV','IP_ADDRESS') FROM DUAL
 
 --
 
-pds.setInitialPoolSize(10);
-pds.setMinPoolSize(10);
-pds.setMaxPoolSize(1100);
-pds.setConnectionWaitTimeout(60);
-
-// Force the pool to fully start now, single-threaded, before any
-// concurrent worker threads race to trigger lazy startup.
-try (Connection warmupPool = pds.getConnection()) {
-    // no-op, just forces startup
-}
