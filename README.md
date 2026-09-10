@@ -40,3 +40,35 @@ SELECT SYS_CONTEXT('USERENV','IP_ADDRESS') FROM DUAL
 
 --
 
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Future;
+
+public void preWarmPool(int targetSize, int concurrency) {
+    ExecutorService warmupPool = Executors.newFixedThreadPool(concurrency);
+    List<Connection> held = new CopyOnWriteArrayList<>();
+    List<Future<?>> futures = new ArrayList<>();
+
+    for (int i = 0; i < targetSize; i++) {
+        futures.add(warmupPool.submit(() -> {
+            try {
+                held.add(pds.getConnection());
+            } catch (SQLException e) {
+                throw new RuntimeException("Pre-warm connection failed", e);
+            }
+        }));
+    }
+
+    try {
+        for (Future<?> f : futures) {
+            f.get(); // surfaces the first failure, if any
+        }
+    } catch (Exception e) {
+        throw new RuntimeException("Pre-warm failed with concurrency=" + concurrency, e);
+    } finally {
+        warmupPool.shutdown();
+        for (Connection c : held) {
+            try { c.close(); } catch (SQLException ignored) {}
+        }
+    }
+}
